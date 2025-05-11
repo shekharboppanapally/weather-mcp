@@ -1,6 +1,6 @@
 {
-  "name": "weather-mcp",
-  "version": "1.0.0",
+  "name": "shekhar-weather-mcp",
+  "version": "1.0.1",
   "description": "A Model Context Protocol (MCP) server for weather information using the Weatherstack API",
   "main": "src/index.js",
   "scripts": {

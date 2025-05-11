@@ -79,49 +79,96 @@ app.get('/health', (req, res) => {
   });
 });
 
-// MCP API endpoint for obtaining capabilities
-app.get('/mcp', (req, res) => {
-  res.json({
-    protocol: {
-      name: 'mcp',
-      version: '0.1.0'
-    },
-    tools: {
-      weather: {
-        description: 'Get weather information for a location',
-        operations: {
-          currentWeather: {
-            description: 'Get current weather for a city or location',
-            parameters: {
-              city: {
-                type: 'string',
-                description: 'City name (e.g., "New York")'
+// MCP API endpoint - handles both GET and POST requests
+app.all('/mcp', async (req, res) => {
+  // Handle GET request for capabilities discovery
+  if (req.method === 'GET') {
+    return res.json({
+      jsonrpc: "2.0",
+      result: {
+        protocol: {
+          name: 'mcp',
+          version: '0.1.0'
+        },
+        tools: {
+          weather: {
+            description: 'Get weather information for a location',
+            operations: {
+              currentWeather: {
+                description: 'Get current weather for a city or location',
+                parameters: {
+                  city: {
+                    type: 'string',
+                    description: 'City name (e.g., "New York")'
+                  }
+                }
               }
             }
           }
         }
       }
-    }
-  });
-});
-
-// MCP API endpoint for using tools
-app.post('/mcp', async (req, res) => {
-  try {
-    const { tool, operation, parameters } = req.body;
+    });
+  }
+  
+  // Handle POST request for tool usage (JSON-RPC format)
+  if (req.method === 'POST') {
+    // Ensure proper JSON-RPC format
+    const { jsonrpc, id, method, params } = req.body;
     
-    if (tool !== 'weather') {
-      return res.status(400).json({ 
-        error: `Unsupported tool: ${tool}. Currently only 'weather' tool is supported.` 
+    // Validate JSON-RPC request
+    if (!jsonrpc || jsonrpc !== '2.0' || !method) {
+      return res.status(400).json({
+        jsonrpc: '2.0',
+        id: id || null,
+        error: {
+          code: -32600,
+          message: 'Invalid Request',
+          data: 'Request must follow JSON-RPC 2.0 specification'
+        }
       });
     }
     
+    // Parse the method as tool.operation
+    const [tool, operation] = method.split('.');
+    
+    // Handle unsupported tools
+    if (tool !== 'weather') {
+      return res.status(400).json({
+        jsonrpc: '2.0',
+        id: id || null,
+        error: {
+          code: -32601,
+          message: 'Method not found',
+          data: `Unsupported tool: ${tool}. Currently only 'weather' tool is supported.`
+        }
+      });
+    }
+    
+    // Handle operation
     if (operation === 'currentWeather') {
       try {
-        const data = await fetchWeatherData(parameters.city);
+        // Extract parameters
+        const city = params && params.city;
         
-        // Return standardized weather data
-        res.json({
+        if (!city) {
+          return res.status(400).json({
+            jsonrpc: '2.0',
+            id: id || null,
+            error: {
+              code: -32602,
+              message: 'Invalid params',
+              data: 'City parameter is required'
+            }
+          });
+        }
+        
+        // Fetch weather data
+        const data = await fetchWeatherData(city);
+        
+        // Return standardized weather data in JSON-RPC format
+        return res.json({
+          jsonrpc: '2.0',
+          id: id || null,
           result: {
             city: data.location.name,
             country: data.location.country,
@@ -145,24 +192,39 @@ app.post('/mcp', async (req, res) => {
           }
         });
       } catch (error) {
-        // Simply return "not available" when API is unavailable
-        res.json({
+        // Return error in JSON-RPC format
+        return res.json({
+          jsonrpc: '2.0',
+          id: id || null,
           result: {
             status: "not available",
             message: "Weather data is currently not available"
           }
         });
       }
+    } else {
+      // Handle unsupported operations
+      return res.status(400).json({
+        jsonrpc: '2.0',
+        id: id || null,
+        error: {
+          code: -32601,
+          message: 'Method not found',
+          data: `Unsupported operation: ${operation}`
+        }
+      });
     }
-    else {
-      res.status(400).json({ error: `Unsupported operation: ${operation}` });
-    }
-  } catch (error) {
-    res.status(500).json({ 
-      error: error.message,
-      message: "Weather data is not available"
-    });
   }
+  
+  // Handle any other HTTP methods
+  return res.status(405).json({
+    jsonrpc: '2.0',
+    error: {
+      code: -32600,
+      message: 'Invalid Request',
+      data: `HTTP method ${req.method} not supported`
+    }
+  });
 });
 
 // CLI mode for direct weather lookup
